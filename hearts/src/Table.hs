@@ -140,9 +140,58 @@ addToPile playerPiles player cards =
   in Map.insert player (Set.union playerPile (Set.fromList cards)) playerPiles
 
 -- Ereignis in den Zustand einarbeiten
+-- TableState: projection
 tableProcessEvent :: GameEvent -> TableState -> TableState
-tableProcessEvent event state | trace ("processGameEvent " ++ show state ++ " " ++ show event) False = undefined
+-- tableProcessEvent event state | trace ("processGameEvent " ++ show state ++ " " ++ show event) False = undefined
+-- tableProcessEvent (HandDealt player hand) state = undefined
+---tableProcessEvent (PlayerTurnChanged player) state = undefined 
+-- ...
+tableProcessEvent (HandDealt player hand) state =
+  state {
+    tableStateHands = Map.insert player hand (tableStateHands state),
+    tableStateTrick = emptyTrick
+  }
+tableProcessEvent (PlayerTurnChanged player) state =
+  state {
+    tableStatePlayers  = rotateTo player (tableStatePlayers state)
+  }
+tableProcessEvent (LegalCardPlayed player card) state =
+  state {
+    tableStateHands = takeCard (tableStateHands state) player card,
+    tableStateTrick = addToTrick player card (tableStateTrick state)
+  }
+tableProcessEvent (TrickTaken player trick) state =
+  state
+    { tableStatePiles =
+        addToPile (tableStatePiles state) player (cardsOfTrick trick),
+      tableStateTrick = emptyTrick
+    }
+tableProcessEvent (IllegalCardPlayed player card) state = state
+tableProcessEvent (GameEnded player) state = state
 
 -- Ereignisse eines Befehls ermitteln
 tableProcessCommand :: GameCommand -> TableState -> [GameEvent]
-tableProcessCommand command state | trace ("processGameCommand " ++ show (gameAtBeginning state) ++ " " ++ show command ++ " " ++ show state) False = undefined
+-- tableProcessCommand command state | trace ("processGameCommand " ++ show (gameAtBeginning state) ++ " " ++ show command ++ " " ++ show state) False = undefined
+tableProcessCommand (DealHands hands) state = 
+  map (uncurry HandDealt) (Map.toList hands)
+tableProcessCommand (PlayCard player card) state =
+   if playValid state player card
+   then 
+     let event1 = LegalCardPlayed player card
+         state1 = tableProcessEvent event1 state -- state after card got played
+      in
+        if turnOver state1 -- need to use correct state!
+        then 
+          let trick1 = tableStateTrick state1
+              trickTaker = whoTakesTrick trick1
+              event2 = TrickTaken trickTaker trick1
+              state2 = tableProcessEvent event2 state1 -- need to use correct state!
+              event3 = case gameOver state2 of
+                        Just winner -> GameEnded winner
+                        Nothing -> PlayerTurnChanged trickTaker
+          in [event1, event2, event3]
+        else 
+          let event2 = PlayerTurnChanged (playerAfter state1 player)
+          in [event1, event2]
+   else
+     [IllegalCardPlayed player card]
